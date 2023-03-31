@@ -303,6 +303,8 @@ class PbsBaseClass(Scheduler):
         # Required to change directory to the working directory, that is
         # the one from which the job was submitted
         lines.append('cd "$PBS_O_WORKDIR"')
+        if job_tmpl.job_resource.num_cores_per_mpiproc:
+            lines.append(f'export OMP_NUM_THREADS={job_tmpl.job_resource.num_cores_per_mpiproc}')
         lines.append(empty_line)
 
         return '\n'.join(lines)
