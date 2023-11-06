@@ -536,8 +536,9 @@ def run_cli_command(reset_log_level, aiida_instance, aiida_profile):  # pylint: 
             assert result.exception is not None, result.output
             assert result.exit_code != 0, result.exit_code
         else:
-            assert result.exception is None, result.output
-            assert result.exit_code == 0, result.exit_code
+            import traceback
+            assert result.exception is None, ''.join(traceback.format_exception(*result.exc_info))
+            assert result.exit_code == 0, (result.exit_code, result.stderr)
 
         return result
 
@@ -613,14 +614,15 @@ def run_cli_command_runner(command, parameters, user_input, initialize_ctx_obj, 
 
 @pytest.fixture
 def reset_log_level():
-    """Reset the `aiida.common.log.CLI_LOG_LEVEL` global and reconfigure the logging.
+    """Reset the ``CLI_LOG_ACTIVE`` and ``CLI_LOG_LEVEL`` globals in ``aiida.common.log`` and reconfigure the logging.
 
-    This fixture should be used by tests that will change the ``CLI_LOG_LEVEL`` global, for example, through the
+    This fixture should be used by tests that will change these globals, for example, through the
     :class:`~aiida.cmdline.params.options.main.VERBOSITY` option in a CLI command invocation.
     """
     from aiida.common import log
     try:
         yield
     finally:
+        log.CLI_ACTIVE = None
         log.CLI_LOG_LEVEL = None
         log.configure_logging(with_orm=True)

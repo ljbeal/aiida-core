@@ -9,13 +9,14 @@
 ###########################################################################
 """Module with pre-defined reusable commandline options that can be used as `click` decorators."""
 import click
-from pgsu import DEFAULT_DSN as DEFAULT_DBINFO  # pylint: disable=no-name-in-module
 
 from aiida.common.log import LOG_LEVELS, configure_logging
+from aiida.manage.external.postgres import DEFAULT_DBINFO
 from aiida.manage.external.rmq import BROKER_DEFAULTS
 
 from .. import types
 from ...utils import defaults, echo  # pylint: disable=no-name-in-module
+from .callable import CallableDefaultOption
 from .config import ConfigFileOption
 from .multivalue import MultipleValueOption
 from .overridable import OverridableOption
@@ -91,18 +92,30 @@ def graph_traversal_rules(rules):
 
 
 def set_log_level(_ctx, _param, value):
-    """Fix the log level for all loggers from the cli.
+    """Configure the logging for the CLI command being executed.
 
-    Note that we cannot use the most obvious approach of directly setting the level on the ``AIIDA_LOGGER``. The reason
+    Note that we cannot use the most obvious approach of directly setting the level on the various loggers. The reason
     is that after this callback is finished, the :meth:`aiida.common.log.configure_logging` method can be called again,
-    for example when the database backend is loaded, and this will undo this change. So instead, we change the value of
-    the `aiida.common.log.CLI_LOG_LEVEL` constant. When the logging is reconfigured, that value is no longer ``None``
-    which will ensure that the ``cli`` handler is configured for all handlers with the level of ``CLI_LOG_LEVEL``. This
-    approach tighly couples the generic :mod:`aiida.common.log` module to the :mod:`aiida.cmdline` module, which is not
-    the cleanest, but given that other module code can undo the logging configuration by calling that method, there
-    seems no easy way around this approach.
+    for example when the database backend is loaded, and this will undo this change. So instead, we set to globals in
+    the :mod:`aiida.common.log` module: ``CLI_ACTIVE`` and ``CLI_LOG_LEVEL``. The ``CLI_ACTIVE`` global is always set to
+    ``True``. The ``configure_logging`` function will interpret this as the code being executed through a ``verdi``
+    call. The ``CLI_LOG_LEVEL`` global is only set if an explicit value is set for the ``--verbosity`` option. In this
+    case, it is set to the specified log level and ``configure_logging`` will then set this log level for all loggers.
+
+    This approach tightly couples the generic :mod:`aiida.common.log` module to the :mod:`aiida.cmdline` module, which
+    is not the cleanest, but given that other module code can undo the logging configuration by calling that method,
+    there seems no easy way around this approach.
     """
     from aiida.common import log
+
+    log.CLI_ACTIVE = True
+
+    # If the value is ``None``, it means the option was not specified, but we still configure logging for the CLI
+    # However, we skip this when we are in a tab-completion context.
+    if value is None:
+        if not _ctx.resilient_parsing:
+            configure_logging()
+        return None
 
     try:
         log_level = value.upper()
@@ -124,7 +137,6 @@ VERBOSITY = OverridableOption(
     '-v',
     '--verbosity',
     type=click.Choice(tuple(map(str.lower, LOG_LEVELS.keys())), case_sensitive=False),
-    default='REPORT',
     callback=set_log_level,
     expose_value=False,  # Ensures that the option is not actually passed to the command, because it doesn't need it
     help='Set the verbosity of the output.'
@@ -136,6 +148,7 @@ PROFILE = OverridableOption(
     'profile',
     type=types.ProfileParamType(),
     default=defaults.get_default_profile,
+    cls=CallableDefaultOption,
     help='Execute the command for this profile instead of the default profile.'
 )
 
@@ -276,17 +289,23 @@ USER_INSTITUTION = OverridableOption(
 
 DB_ENGINE = OverridableOption(
     '--db-engine',
+    required=True,
     help='Engine to use to connect to the database.',
     default='postgresql_psycopg2',
     type=click.Choice(['postgresql_psycopg2'])
 )
 
 DB_BACKEND = OverridableOption(
-    '--db-backend', type=click.Choice(['core.psql_dos']), default='core.psql_dos', help='Database backend to use.'
+    '--db-backend',
+    required=True,
+    type=click.Choice(['core.psql_dos']),
+    default='core.psql_dos',
+    help='Database backend to use.'
 )
 
 DB_HOST = OverridableOption(
     '--db-host',
+    required=True,
     type=types.HostnameType(),
     help='Database server host. Leave empty for "peer" authentication.',
     default='localhost'
@@ -294,6 +313,7 @@ DB_HOST = OverridableOption(
 
 DB_PORT = OverridableOption(
     '--db-port',
+    required=True,
     type=click.INT,
     help='Database server port.',
     default=DEFAULT_DBINFO['port'],
